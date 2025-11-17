@@ -1,0 +1,2105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>PAGASA/USA Bulletin Map - Accurate Cone & Wind</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+<style>
+/* =========================================================================
+   CORE LAYOUT & BORDERS (FINAL REDUCTION: -20% MARGINS)
+   ========================================================================= */
+html,body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;background:#fff}
+#map-container{
+position:relative;
+width:2710px;height:2230px; /* FIXED RESOLUTION */
+margin:20px auto;
+background:#BEE8FF; /* Default Ocean Color */
+box-shadow:0 0 10px rgba(0,0,0,.25);
+overflow:visible;
+}
+/* This is the main Leaflet map area, positioned PRECISELY inside the inner borders */
+#map-leaflet-area{
+position:absolute; 
+top:106px; /* 105px top strip + 1px border */
+left:56px; /* 55px left strip + 1px border */
+right:56px; /* 55px right strip + 1px border */
+bottom:79px; /* 78px bottom strip + 1px border */
+z-index:1; 
+overflow:hidden;
+}
+
+/* Map Interaction Locks */
+#map-leaflet-area.locked {
+    pointer-events: none; 
+}
+#map-leaflet-area.drawing {
+    cursor: crosshair; 
+}
+
+#map-leaflet-area .leaflet-pane, .leaflet-container, .leaflet-tile-container { background:transparent!important; }
+.leaflet-control-zoom { display:none!important; }
+#land-overlay,#svg-overlay,#par-overlay{ position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+#land-overlay{ z-index:12 }
+#par-overlay { z-index:13 }
+#svg-overlay { z-index:14 } /* Contains graticule lines */
+
+/* The White Strips (Precise Dimensions) */
+.strip{
+position:absolute;
+background:white;
+z-index:50;
+display:block;
+overflow: hidden;
+}
+#top-strip{
+top:0; left:0; right:0; 
+/* -20% Reduction (210 * 0.8) */
+height:168px;
+z-index:1000;
+display:flex;
+align-items:center;
+justify-content:space-between;
+padding:0 7px;
+}
+#bottom-strip{ bottom:0; left:0; right:0; 
+/* -20% Reduction (156 * 0.8, rounded up) */
+height:125px; 
+}
+#left-strip{ top:0; bottom:0; left:0; 
+/* -20% Reduction (83 * 0.8, rounded down) */
+width:66px; 
+}
+#right-strip{ top:0; bottom:0; right:0; 
+/* -20% Reduction (83 * 0.8, rounded down) */
+width:66px; 
+}
+
+/* Inner Borders (Precise Positioning) */
+.inner-border{ position:absolute; background:black; z-index:55; }
+/* Horizontal borders (top & bottom) */
+#inner-top{ top:168px; left:66px; right:66px; height:3.5px; }
+#inner-bottom{ bottom:125px; left:66px; right:66px; height:2.5px; }
+/* Vertical borders (left & right) */
+#inner-left{ top:168px; bottom:125px; left:66px; width:2.5px; }
+#inner-right{ top:168px; bottom:125px; right:66px; width:2.5px; }
+
+/* Signature and Clock */
+#signature-box{
+font-size:32px; font-weight:normal; white-space:nowrap; display:flex; align-items:flex-start; height:100%; padding-left:5px;
+}
+#signature-text{ font-weight:normal; padding:0 5px; outline:none; }
+#date-time-box{
+font-size:32px; font-weight:normal; white-space:nowrap; height:100%;
+display:flex; flex-direction:row; justify-content:flex-end; align-items:flex-start;
+padding-right:5px; line-height:1; gap:2px;
+}
+.clock-time{ font-weight:normal; font-size:32px; }
+
+/* Coordinate Labels (REBUILT FOR ACCURATE CENTERING) */
+.coord-edge{
+position:absolute; background:transparent; color:black; font-weight:normal;
+padding:0; border-radius:0; pointer-events:none; 
+/* Font size remains at the reduced 27.2px */
+font-size:35px; 
+white-space:nowrap;
+z-index:65; transition-property:left, top, transform, opacity;
+transition-timing-function:linear; will-change:left, top, transform; opacity:1!important;
+}
+
+/* Top Labels: Centered in the new 168px strip */
+.coord-edge.top{ 
+    /* *** ADJUSTMENT: Centered in 168px strip (168 / 2 = 84px) *** */
+    top: 138px; 
+    transform:translateY(-50%) translateX(-50%); 
+}
+/* Bottom Labels: Centered in the new 125px strip */
+.coord-edge.bottom{ 
+    /* *** ADJUSTMENT: Centered in 125px strip (125 / 2 = 62.5px) *** */
+    bottom: 95.5px; 
+    transform:translateY(50%) translateX(-50%); 
+}
+/* Left Labels: Centered in the new 66px strip */
+.coord-edge.left{ 
+    /* *** ADJUSTMENT: Centered in 66px strip (66 / 2 = 33px) *** */
+    left: 33px; 
+    transform:translateX(-50%) translateY(-50%) rotate(-90deg); 
+}
+/* Right Labels: Centered in the new 66px strip */
+.coord-edge.right{ 
+    /* *** ADJUSTMENT: Centered in 66px strip (66 / 2 = 33px) *** */
+    right: 33px; 
+    transform:translateX(50%) translateY(-50%) rotate(-90deg); 
+}
+
+/* =========================================================================
+   CANVA EDITING STYLES (Unchanged)
+   ========================================================================= */
+#canva-overlay {
+    position: absolute; 
+    /* Positioned inside the map area */
+    top:106px; left:56px; right:56px; bottom:79px;
+    z-index: 100; /* Above map elements, below controls */
+    pointer-events: none; /* Default: allows map interaction */
+    overflow: hidden;
+}
+#canva-overlay.active {
+    pointer-events: auto; /* Active: captures mouse events */
+}
+.annotation-element {
+    position: absolute;
+    cursor: grab;
+    user-select: none;
+    outline: 2px solid transparent;
+    transition: outline-color 0.1s ease;
+    box-sizing: border-box; /* Crucial for resize */
+}
+.annotation-element.selected {
+    outline: 2px dashed #007bff;
+    cursor: move;
+    resize: both; /* For text and images/shapes */
+    overflow: auto; /* Required for resize to work */
+    min-width: 15px; /* Ensure resize handle is visible */
+    min-height: 15px;
+}
+.annotation-element:not(.selected) {
+    cursor: grab;
+}
+.annotation-element.selected:hover {
+    cursor: move; /* Change to move on hover when selected */
+}
+.annotation-text {
+    white-space: pre-wrap; /* preserve multiple spaces and wrap lines */
+    min-width: 10px;
+    min-height: 10px;
+    padding: 2px;
+    font-size: 16px; /* Default size for easy editing */
+    outline: none; /* Hide default contenteditable outline */
+    border: none;
+}
+.annotation-image {
+    width: 100%; /* Image fills the resizable div */
+    height: 100%;
+    pointer-events: none; /* image inside div shouldn't capture mouse */
+    object-fit: contain;
+}
+.annotation-shape {
+    min-width: 10px;
+    min-height: 10px;
+}
+/* Style for the layer list items */
+.annotation-list-item {
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    border-radius: 4px;
+    background: #f0f0f0;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid #f0f0f0;
+}
+.annotation-list-item.selected {
+    background: #e0f0ff;
+    border-color: #007bff;
+    font-weight: bold;
+}
+
+/* =========================================================================
+   CONTROLS & UI STYLES
+   ========================================================================= */
+#controls strong { font-weight: normal; }
+#controls{
+width:2710px; /* MATCH MAP WIDTH */
+margin:8px auto 0; display:flex; gap:12px; justify-content:center; align-items:flex-start;
+font-size:14px;
+}
+#controls .panel{
+background:#fff;border-radius:8px;padding:10px;box-shadow:0 6px 16px rgba(0,0,0,0.06);
+display:flex;flex-direction:column;gap:8px;
+}
+#controls label{display:flex;justify-content:space-between;align-items:center;gap:8px}
+#controls input[type=color]{width:40px;height:26px;padding:0;border:none}
+#controls input[type=text], #controls select { padding: 4px; border: 1px solid #ccc; border-radius: 4px; }
+#controls .control-buttons{display:flex;gap:8px; flex-wrap: wrap;}
+button{cursor:pointer;border-radius:5px;border:0;padding:6px 10px}
+#downloadBtn{background:#054950;color:#fff}
+#togglePARBtn{background:#FF9800;color:#fff}
+#toggleGraticuleStyleBtn{background:#1E88E5;color:#fff}
+#startConeBtn{background:#03A9F4; color:#fff;}
+#finishConeBtn{background:#FFC107; color:#000;}
+#resetColorsBtn{background:#9E9E9E; color:#fff;}
+
+/* New Wind Buttons */
+#startWindPolyBtn{background:#28a745; color:#fff;}
+#finishWindPolyBtn{background:#ffc107; color:#000;}
+#clearWindPolysBtn{background:#dc3545; color:#fff;}
+
+#startAnnotationBtn, #finishAnnotationBtn {background:#007bff; color:#fff;}
+#finishAnnotationBtn {background:#ffc107; color:#000;}
+#addTextBtn {background:#3CB371; color:#fff;}
+#addImageBtn {background:#800080; color:#fff;}
+#addRectBtn {background:#FF4500; color:#fff;}
+#deleteAnnotationBtn {background:#dc3545; color:#fff;}
+
+.active-mode{border:2px solid red!important;}
+
+#bottom-area{
+width:2710px; /* MATCH MAP WIDTH */
+margin:10px auto 60px; display:flex; gap:12px; align-items:flex-start; justify-content:center;
+}
+
+/* Custom Cone Marker styles for PAGASA (HTML/Image) */
+.forecast-marker-label {
+position: absolute; font-size: 18px; font-weight: bold; color: black; white-space: nowrap; padding: 2px 4px; line-height: 1.2; text-align: left; z-index: 1000; background: rgba(255, 255, 255, 0.7); border-radius: 3px;
+}
+
+/* Custom class for the dot marker used in wind polygon drawing */
+.wind-marker {
+    background: red;
+    border-radius: 50%;
+    border: 1px solid black;
+}
+
+/* USA-style icons (CSS-based Circle Markers - for legend/list use only) */
+.usa-icon {
+position: relative; width: 12px; height: 12px; border-radius: 50%; text-align: center; line-height: 10px; font-size: 8px; font-weight: bold; transform: translate(-50%, -50%); box-sizing: border-box;
+border: 1px solid black;
+}
+.usa-icon.L, .usa-icon.D { background-color: #007bff; color: white; }
+.usa-icon.S { background-color: #28a745; color: white; }
+.usa-icon.C1 { background-color: #ffc107; color: black; border-color: #666; }
+.usa-icon.C2 { background-color: #fd7e14; color: white; }
+.usa-icon.C3 { background-color: #dc3545; color: white; }
+.usa-icon.C4 { background-color: #d63384; color: white; }
+.usa-icon.C5 { background-color: #6f42c1; color: white; }
+.usa-icon.T { background-color: black; color: white; border: 1px solid white; box-shadow: 0 0 0 1px black; }
+</style>
+<style id="custom-font-styles"></style>
+</head>
+<body>
+<svg id="svg-defs" style="position: absolute; width: 0; height: 0;">
+<defs>
+<pattern id="dotted-fill-pagasa" patternUnits="userSpaceOnUse" width="8" height="8">
+<rect width="8" height="8" fill="white" fill-opacity="0.3"/>
+<circle cx="2" cy="2" r="1" fill="black" fill-opacity="0.7"/>
+</pattern>
+<pattern id="dotted-fill-usa" patternUnits="userSpaceOnUse" width="8" height="8">
+<rect width="8" height="8" fill="#F0F8FF" fill-opacity="0.7"/>
+<circle cx="2" cy="2" r="1" fill="#000000" fill-opacity="0.8"/>
+</pattern>
+</defs>
+</svg>
+
+<div id="map-container">
+<div id="top-strip" class="strip">
+<div id="signature-box">
+<span id="signature-text" contenteditable="true">FORECAST TRACK PREPARED BY: Althea (@thea_girl) – BASED ON DIFFERENT MODELS</span>
+</div>
+<div id="date-time-box">
+<span id="dateText"></span>
+<span id="timeText" class="clock-time"></span>
+</div>
+</div>
+<div id="bottom-strip" class="strip"></div>
+<div id="left-strip" class="strip"></div>
+<div id="right-strip" class="strip"></div>
+
+<svg id="land-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+<svg id="par-overlay" xmlns="http://www.w3.org/2000/svg"></svg>
+<svg id="svg-overlay" xmlns="http://www.w3.org/2003/svg"></svg>
+<div id="map-leaflet-area"></div>
+<div id="canva-overlay"></div> 
+
+<div id="inner-top" class="inner-border"></div>
+<div id="inner-bottom" class="inner-border"></div>
+<div id="inner-left" class="inner-border"></div>
+<div id="inner-right" class="inner-border"></div>
+</div>
+<div id="controls">
+<div class="panel">
+<strong>Map Overlays & Style</strong>
+<label>🌍 Land Color: <input id="landColor" type="color" value="#FFEABD"></label>
+<label>🌊 Ocean Color: <input id="oceanColor" type="color" value="#BEE8FF"></label>
+<label>📏 Graticule thickness: <input id="graticuleWeight" type="range" min="0.5" max="3" step="0.1" value="1.2"></label>
+<label>🗺 Show grid: <input id="gridToggle" type="checkbox" checked></label>
+<label>🌍 Show land: <input id="landToggle" type="checkbox" checked></label>
+<label>Lat. Grid Step (°): <input id="latStepInput" type="number" min="1" max="15" step="1" value="5"></label>
+<label>Lon. Grid Step (°): <input id="lonStepInput" type="number" min="1" max="15" step="1" value="5"></label>
+<div class="control-buttons">
+<button id="downloadBtn">🖼 Preview & Download</button>
+<button id="togglePARBtn">🟠 Toggle PAR</button>
+<button id="toggleGraticuleStyleBtn">➖ Solid Graticule</button>
+<button id="resetColorsBtn">🎨 Reset Colors</button> </div>
+</div>
+
+<div class="panel">
+<strong>🌀 Cone of Probability & Track</strong>
+<label>Cone Style:
+<select id="coneStyleSelect">
+<option value="pagasa" selected>PAGASA Style (White 35% Fill, Black Outline)</option>
+<option value="usa">USA Style (Light Blue 35% Fill, Black Outline)</option>
+</select>
+</label>
+<label>Icon Type for next point:
+<select id="iconTypeSelect">
+</select>
+</label>
+<label>Icon Size (px): <input id="iconSizeSlider" type="range" min="8" max="80" step="1" value="12"></label>
+<label>Cone Width (km/day): <input id="coneWidthKmDay" type="number" min="10" max="200" step="5" value="100"></label>
+<label>Hide Cone Polygon: <input id="coneToggle" type="checkbox"></label>
+<div class="control-buttons">
+<button id="startConeBtn">▶️ Start Cone Drawing</button>
+<button id="finishConeBtn" disabled>🛑 Finish Cone Drawing</button>
+<button id="loadPAGASAExample">Load PAGASA Example</button>
+</div>
+<div id="coneStatus" style="font-size:11px; color:#555">Status: Ready.</div>
+</div>
+
+<div class="panel" id="windFieldPanel">
+<strong>💨 Wind Field Polygons</strong>
+<label>Wind Field Name: <input id="windPolyName" type="text" value="Gale-Force Winds (<63 kt)" style="width: 150px;"></label>
+<label>Wind Field Color: <input id="windPolyColor" type="color" value="#FFFF00"></label>
+<label>Toggle Wind Display: <input id="windDisplayToggle" type="checkbox" checked></label>
+<div class="control-buttons">
+<button id="startWindPolyBtn">✏️ Start Wind Polygon</button>
+<button id="finishWindPolyBtn" disabled>❌ Finish Wind Polygon</button>
+<button id="clearWindPolysBtn">🗑 Clear All Wind</button>
+</div>
+<div id="windStatus" style="font-size:11px; color:#555">Status: Ready.</div>
+</div>
+<div class="panel" id="annotationPanel">
+    <strong>🎨 Map Annotations (Canva-like)</strong>
+    <div class="control-buttons">
+        <button id="startAnnotationBtn">🎨 Start Map Annotation</button>
+        <button id="finishAnnotationBtn" disabled>✅ Finish Annotation</button>
+    </div>
+    <div id="annotationTools" style="display:none; flex-direction:column; gap:8px;">
+        <hr style="margin: 0; border-top: 1px solid #eee;">
+        <label>Selected Color: <input id="annotationColor" type="color" value="#0"></label>
+        <div class="control-buttons">
+            <button id="addTextBtn">🅰️ Add Text</button>
+            <input type="file" id="imageInput" accept="image/*" style="display:none;">
+            <button id="addImageBtn">🖼 Import Image</button>
+            <button id="addRectBtn">⬛️ Add Rectangle</button>
+        </div>
+        <button id="deleteAnnotationBtn" disabled>🗑 Delete Selected</button>
+        
+        <hr style="margin: 0; border-top: 1px solid #eee;">
+        <strong>Active Annotations</strong>
+        <div id="annotationList" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 4px; border-radius: 4px;">
+            <div style="color: #999; font-size: 11px;">No elements added yet.</div>
+        </div>
+    </div>
+    <div id="annotationStatus" style="font-size:11px; color:#555">Status: Ready.</div>
+</div>
+
+<div class="panel" id="philippinesPanel">
+    <strong>🇵🇭 Philippines Provinces</strong>
+    <label>Toggle Provinces: <input id="philippinesToggle" type="checkbox"></label>
+    <div id="phStatus" style="font-size:11px; color:#555">Status: Ready.</div>
+</div>
+
+<div class="panel" id="pointInputPanel">
+    <strong>📅 Point Data (Optional)</strong>
+    <input type="text" id="pointDateTimeInput" placeholder="Date/Time (e.g., 11AM 23 Oct. 2025)" style="width: 100%; padding: 4px; box-sizing: border-box;">
+    <input type="text" id="pointNotesInput" placeholder="Notes (e.g., Cat 3, TD)" style="width: 100%; padding: 4px; box-sizing: border-box;">
+    <button id="applyPointDataBtn" disabled>Apply Data to Last Point</button>
+    <div style="font-size:11px; color:#555">Applies Date/Notes to the last point clicked.</div>
+</div>
+
+<div class="panel">
+    <strong>🔤 Custom Font Import</strong>
+    <label>Select Font File (.ttf/.otf):</label>
+    <input type="file" id="customFontInput" accept=".ttf,.otf" style="width: 100%; padding: 4px; box-sizing: border-box;">
+    <label>Font Name (for use in CSS): <input type="text" id="customFontName" value="CustomMapFont" style="width: 100%; padding: 4px; box-sizing: border-box;"></label>
+    <div class="control-buttons">
+        <button id="applyCustomFontBtn" disabled>Apply Font</button>
+        <button id="resetFontBtn">Reset to Arial</button>
+    </div>
+    <div id="fontStatus" style="font-size:11px; color:#555">Status: Ready.</div>
+</div>
+</div>
+<div id="bottom-area">
+</div>
+<div id="previewModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.75); z-index:9998; justify-content:center; align-items:center;">
+<div class="box" style="background:white; padding:15px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.5);">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<strong>Preview — exported image</strong>
+<div>
+<button id="saveImageBtn" style="margin-right:8px; background:#054950; color:#fff;">Save</button>
+<button id="closePreview" style="background:#9E9E9E; color:#fff;">Close</button>
+</div>
+</div>
+<div id="previewImageHolder" style="border:1px solid #ccc; background:#f0f0f0; max-width:90vw; max-height:90vh; overflow:auto;"></div>
+</div>
+</div>
+<script>
+// =========================================================================
+// CORE UTILITY FUNCTIONS 
+// =========================================================================
+
+const EARTH_RADIUS_KM = 6371;
+const ARC_STEPS = 50; // Increased for a smoother final arc
+function rhumbDestination(latlng, distanceKm, bearing) {
+    const R = EARTH_RADIUS_KM;
+    const phi1 = latlng.lat * Math.PI / 180;
+    const lambda1 = latlng.lng * Math.PI / 180;
+    const brng = bearing * Math.PI / 180;
+
+    const delta = distanceKm / R;
+    let phi2 = phi1 + delta * Math.cos(brng);
+
+    const deltaPsi = Math.log(Math.tan(phi2 / 2 + Math.PI / 4) / Math.tan(phi1 / 2 + Math.PI / 4));
+    let q = (Math.abs(phi2 - phi1) > 1e-10) ? (phi2 - phi1) / deltaPsi : Math.cos(phi1);
+
+    // Handle poles
+    if (Math.abs(phi2) > Math.PI / 2) {
+        phi2 = phi2 > 0 ? Math.PI - phi2 : -Math.PI - phi2;
+    }
+
+    const deltaLambda = delta * Math.sin(brng) / q;
+    let lambda2 = lambda1 + deltaLambda;
+    lambda2 = (lambda2 + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
+
+    return L.latLng(phi2 * 180 / Math.PI, lambda2 * 180 / Math.PI);
+}
+function rhumbBearing(latlng1, latlng2) { 
+    const phi1 = latlng1.lat * Math.PI / 180;
+    const phi2 = latlng2.lat * Math.PI / 180;
+    const lambda1 = latlng1.lng * Math.PI / 180;
+    const lambda2 = latlng2.lng * Math.PI / 180;
+
+    let deltaLambda = (lambda2 - lambda1);
+    
+    // handle dateline
+    if (deltaLambda > Math.PI) deltaLambda -= 2 * Math.PI;
+    if (deltaLambda < -Math.PI) deltaLambda += 2 * Math.PI;
+
+    const deltaPsi = Math.log(Math.tan(phi2 / 2 + Math.PI / 4) / Math.tan(phi1 / 2 + Math.PI / 4));
+
+    const bearingRad = Math.atan2(deltaLambda, deltaPsi);
+    const bearingDeg = bearingRad * 180 / Math.PI;
+
+    return (bearingDeg + 360) % 360; 
+}
+function greatCircleDistance(latlng1, latlng2) {
+    const R = EARTH_RADIUS_KM;
+    const phi1 = latlng1.lat * Math.PI / 180;
+    const phi2 = latlng2.lat * Math.PI / 180;
+    const deltaPhi = (latlng2.lat - latlng1.lat) * Math.PI / 180;
+    const deltaLambda = (latlng2.lng - latlng1.lng) * Math.PI / 180;
+
+    const a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+        Math.cos(phi1) * Math.cos(phi2) *
+        Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+}
+function getCirclePerimeterPoints(center, radiusKm, numPoints = 32) {
+    const points = [];
+    for (let i = 0; i < numPoints; i++) {
+        const bearing = (i * 360) / numPoints;
+        points.push(rhumbDestination(center, radiusKm, bearing));
+    }
+    return points;
+}
+
+
+// =========================================================================
+// DOM & STATE SETUP
+// =========================================================================
+
+const Dom = {
+    mapAreaEl: document.getElementById('map-leaflet-area'),
+    landSVG: document.getElementById('land-overlay'),
+    gridSVG: document.getElementById('svg-overlay'),
+    parSVG: document.getElementById('par-overlay'),
+    topStrip: document.getElementById('top-strip'),
+    bottomStrip: document.getElementById('bottom-strip'),
+    leftStrip: document.getElementById('left-strip'),
+    rightStrip: document.getElementById('right-strip'),
+    dateText: document.getElementById('dateText'),
+    timeText: document.getElementById('timeText'),
+    canvaOverlay: document.getElementById('canva-overlay'),
+
+    controls: {
+        landColor: document.getElementById('landColor'),
+        oceanColor: document.getElementById('oceanColor'),
+        graticuleWeight: document.getElementById('graticuleWeight'),
+        gridToggle: document.getElementById('gridToggle'),
+        landToggle: document.getElementById('landToggle'),
+        latStepInput: document.getElementById('latStepInput'),
+        lonStepInput: document.getElementById('lonStepInput'),
+        
+        coneStyleSelect: document.getElementById('coneStyleSelect'),
+        iconTypeSelect: document.getElementById('iconTypeSelect'),
+        iconSizeSlider: document.getElementById('iconSizeSlider'),
+        coneToggle: document.getElementById('coneToggle'),
+        coneWidthKmDay: document.getElementById('coneWidthKmDay'),
+        // Removed dayConeToggle as the core logic now handles smooth cone growth
+    },
+    downloadBtn: document.getElementById('downloadBtn'),
+    togglePARBtn: document.getElementById('togglePARBtn'),
+    toggleGraticuleStyleBtn: document.getElementById('toggleGraticuleStyleBtn'),
+    startConeBtn: document.getElementById('startConeBtn'),
+    finishConeBtn: document.getElementById('finishConeBtn'),
+    coneStatus: document.getElementById('coneStatus'),
+    resetColorsBtn: document.getElementById('resetColorsBtn'),
+    loadPAGASAExample: document.getElementById('loadPAGASAExample'),
+
+    pointDateTimeInput: document.getElementById('pointDateTimeInput'),
+    pointNotesInput: document.getElementById('pointNotesInput'),
+    applyPointDataBtn: document.getElementById('applyPointDataBtn'),
+
+    // NEW Wind Polygon Controls
+    startWindPolyBtn: document.getElementById('startWindPolyBtn'),
+    finishWindPolyBtn: document.getElementById('finishWindPolyBtn'),
+    clearWindPolysBtn: document.getElementById('clearWindPolysBtn'),
+    windPolyName: document.getElementById('windPolyName'),
+    windPolyColor: document.getElementById('windPolyColor'),
+    windDisplayToggle: document.getElementById('windDisplayToggle'),
+    windStatus: document.getElementById('windStatus'),
+    
+    philippinesToggle: document.getElementById('philippinesToggle'),
+    phStatus: document.getElementById('phStatus'),
+
+    // Annotation Controls
+    startAnnotationBtn: document.getElementById('startAnnotationBtn'),
+    finishAnnotationBtn: document.getElementById('finishAnnotationBtn'),
+    annotationTools: document.getElementById('annotationTools'),
+    annotationColor: document.getElementById('annotationColor'),
+    addTextBtn: document.getElementById('addTextBtn'),
+    addImageBtn: document.getElementById('addImageBtn'),
+    imageInput: document.getElementById('imageInput'),
+    addRectBtn: document.getElementById('addRectBtn'),
+    deleteAnnotationBtn: document.getElementById('deleteAnnotationBtn'),
+    annotationStatus: document.getElementById('annotationStatus'),
+    annotationList: document.getElementById('annotationList'),
+
+    previewModal: document.getElementById('previewModal'),
+    previewHolder: document.getElementById('previewImageHolder'),
+    saveImageBtn: document.getElementById('saveImageBtn'),
+    closePreviewBtn: document.getElementById('closePreview'),
+
+    // NEW Font Controls
+    customFontInput: document.getElementById('customFontInput'),
+    customFontName: document.getElementById('customFontName'),
+    applyCustomFontBtn: document.getElementById('applyCustomFontBtn'),
+    resetFontBtn: document.getElementById('resetFontBtn'),
+    fontStatus: document.getElementById('fontStatus'),
+    customFontStyles: document.getElementById('custom-font-styles'),
+};
+
+// Removed dayConeToggle from HTML/DOM setup
+const dayConeToggleElement = document.getElementById('dayConeToggle');
+if (dayConeToggleElement) dayConeToggleElement.remove();
+
+
+const FIXED_WIDTH = 2710, FIXED_HEIGHT = 2230;
+// Map inner area now precisely defined by borders
+const innerMapArea = { top:106, left:56, bottom:79, right:56 }; 
+
+const DEFAULT_LAND_COLOR = '#FFEABD';
+const DEFAULT_OCEAN_COLOR = '#BEE8FF';
+
+const State = {
+    geojson:null,
+    coordDivs:{},
+    parVisible:true,
+    lastCenter:null,
+    lastTime:null,
+    speed:0,
+    graticuleStyle: 'solid',
+    coneDrawingMode: false,
+    conePoints: [], 
+    coneLayer: null,
+    trackLayer: null,
+    markerLayer: null, // NEW Layer for markers (always on top)
+    tempCircleLayer: null, // Layer for temporary circles (kept for potential future use)
+    
+    // NEW Wind Polygon State
+    windDrawingMode: false,
+    windPolygons: [], // Stores all finished polygons
+    currentWindPolygon: null, // The polygon being drawn
+    windLayer: null,
+    
+    phProvincesLayer: null,
+    annotationMode: false, 
+    selectedAnnotation: null,
+
+    // NEW Wind Drawing specific
+    currentWindMarker: null, // Marker for the vertex being drawn
+    currentWindVertices: [], // Stores L.LatLngs for the current polygon drawing
+};
+
+
+// --- PAGASA ICONS ---
+const PAGASA_ICONS = {
+    'LPA': 'https://i.imgur.com/8hQaV45.png',  
+    'TD': 'https://i.imgur.com/FR743LJ.png', 
+    'TS': 'https://i.imgur.com/k5gGliw.png',   
+    'STS': 'https://i.imgur.com/ISMnSlH.png',  
+    'TY': 'https://i.imgur.com/B3LYrrH.png',   
+    'STY': 'https://i.imgur.com/sA6RkPf.png',  
+};
+
+// --- USA ICONS (Now image-based like PAGASA) ---
+const USA_ICONS = {
+    'L': 'https://i.imgur.com/nmxUikS.png',           // Hurricane / Low
+    'D': 'https://i.imgur.com/NFmvaoi.png',          // Major
+    'S': 'https://i.imgur.com/KRp0u1d.png',          // Tropical Storm
+    'C1': 'https://i.imgur.com/bi8yxMi.png',         // Cat 1
+    'C2': 'https://i.imgur.com/oL5QJOn.png',         // Cat 2
+    'C3': 'https://i.imgur.com/yFMYwSc.png',         // Cat 3
+    'C4': 'https://i.imgur.com/lJoYqii.png',         // Cat 4
+    'C5': 'https://i.imgur.com/tqWocLr.png',         // Cat 5
+    'CE': 'https://i.imgur.com/dGS6ZG6.png',         // Extreme / C5+
+    'T': 'https://i.imgur.com/HayxyZD.png',          // Tropical Depression
+    'TS': 'https://i.imgur.com/KRp0u1d.png',         // Tropical Storm
+    'LPA': 'https://i.imgur.com/YHyFIHM.png',        // Low Pressure Area
+};
+
+const ICON_TYPE_DATA = {
+    // PAGASA
+    'LPA': { label: 'Low Pressure Area (LPA)', key: 'LPA' }, 
+    'TD': { label: 'Tropical Depression (TD)', key: 'TD' }, 
+    'TS': { label: 'Tropical Storm (TS)', key: 'TS' },
+    'STS': { label: 'Severe Tropical Storm (STS)', key: 'STS' },
+    'TY': { label: 'Typhoon (TY)', key: 'TY' },
+    'STY': { label: 'Super Typhoon (STY)', key: 'STY' },
+
+    // USA (image-based)
+    'L': { label: 'USA - Hurricane / Low (L)', key: 'L' },
+    'D': { label: 'USA - Major (D)', key: 'D' },
+    'S': { label: 'USA - Tropical Storm (S)', key: 'S' },
+    '1': { label: 'USA - Cat 1 (C1)', key: 'C1' },
+    '2': { label: 'USA - Cat 2 (C2)', key: 'C2' },
+    '3': { label: 'USA - Cat 3 (C3)', key: 'C3' },
+    '4': { label: 'USA - Cat 4 (C4)', key: 'C4' },
+    '5': { label: 'USA - Cat 5 (C5)', key: 'C5' },
+    'CE': { label: 'USA - Extreme C5+ (CE)', key: 'CE' },
+    'T': { label: 'USA - Tropical Depression (T)', key: 'T' },
+};
+
+const PAR_COORDS = [[5,115],[15,115],[21,120],[25,120],[25,135],[5,135]];
+
+const mainMap = L.map('map-leaflet-area',{center:[15, 120],zoom:4,minZoom:1,maxZoom:9,zoomSnap:0.25,zoomDelta:0.5,attributionControl:false,zoomControl:false,preferCanvas:true,inertia:true});
+L.tileLayer('data:image/png;base64,iVBORw0KGgoAAAANAAAAACAAAAAAgAAAAAAAAD/QDG0AAAAAXNSR0IArs4c6QAAAD9JREFUeJztwQEBAAAAEAy//qM3oBYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4A8gAAGi90V+2eIAAAAASUVORK5CYII=',{opacity:0}).addTo(mainMap);
+
+
+// =========================================================================
+// GEOSPATIAL UTILITIES & CORE FUNCTIONS
+// =========================================================================
+
+
+// =========================================================================
+// SMOOTH TRACK LINE UTILITIES 
+// =========================================================================
+
+/**
+ * Calculates a smooth path of L.LatLngs between a set of storm center points.
+ * Uses a simplified Catmull-Rom/Cardinal Spline approximation via a 4-point Bézier curve.
+ * @param {Array<L.LatLng>} points - The track points to smooth.
+ * @param {number} tension - Controls how tightly the line follows the points (0=straight, 1=over-curve).
+ * @param {number} numSegments - Number of steps between points.
+ * @returns {Array<L.LatLng>} The new set of smooth coordinates.
+ */
+function getSmoothPath(points, tension = 0.5, numSegments = 30) {
+    if (points.length < 2) return points;
+
+    const smoothPoints = [];
+
+    /**
+     * Calculates a point on a cubic Bézier curve defined by four L.LatLng points.
+     */
+    function getBezierPoint(p0, cp1, cp2, p3, t) {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const mt = 1 - t;
+        const mt2 = mt * mt;
+        const mt3 = mt2 * mt;
+
+        const lat = mt3 * p0.lat + 3 * mt2 * t * cp1.lat + 3 * mt * t2 * cp2.lat + t3 * p3.lat;
+        const lng = mt3 * p0.lng + 3 * mt2 * t * cp1.lng + 3 * mt * t2 * cp2.lng + t3 * p3.lng;
+
+        return L.latLng(lat, lng);
+    }
+    
+    // Always include the first point
+    smoothPoints.push(points[0]);
+
+    for (let i = 0; i < points.length - 1; i++) {
+        const p_curr = points[i];
+        const p_next = points[i+1];
+        
+        // Use the points immediately before and after the segment for tangent estimation
+        const p_prev = i > 0 ? points[i-1] : p_curr;
+        const p_after_next = i < points.length - 2 ? points[i+2] : p_next;
+        
+        // Tangent angle at p_curr is estimated from p_prev to p_next
+        const tangentAngle_curr = rhumbBearing(p_prev, p_next);
+        const dist_curr = greatCircleDistance(p_prev, p_next) * tension * 0.5;
+        // CP1 for the segment (p_curr to p_next) is the control point after p_curr
+        const cp1 = rhumbDestination(p_curr, dist_curr, tangentAngle_curr); 
+
+        // Tangent angle at p_next is estimated from p_curr to p_after_next
+        const tangentAngle_next = rhumbBearing(p_curr, p_after_next);
+        const dist_next = greatCircleDistance(p_curr, p_after_next) * tension * 0.5;
+        // CP2 for the segment (p_curr to p_next) is the control point before p_next
+        // Note the negative distance to go "backwards" from p_next's tangent
+        const cp2 = rhumbDestination(p_next, -dist_next, tangentAngle_next);
+        
+        // Generate segments using the Bézier formula
+        for (let j = 1; j <= numSegments; j++) {
+            smoothPoints.push(getBezierPoint(p_curr, cp1, cp2, p_next, j / numSegments));
+        }
+    }
+    
+    return smoothPoints;
+}
+
+// =========================================================================
+// CONE OF PROBABILITY FUNCTIONS (SINGLE SHAPE/RESIZABLE FIX)
+// =========================================================================
+
+/**
+ * Calculates a point on the perimeter of a circle at a given bearing.
+ */
+function getCirclePoint(center, radiusKm, bearing) {
+    return rhumbDestination(center, radiusKm, bearing);
+}
+
+/**
+ * Generates an array of L.latLng points for the perimeter of a circle arc.
+ */
+function getCircleArcPoints(center, radiusKm, startBearing, endBearing, numPoints = ARC_STEPS) { 
+    if (radiusKm <= 0) return [center];
+
+    const points = [];
+    let start = startBearing;
+    let end = endBearing;
+    
+    // Normalize bearings
+    start = (start % 360 + 360) % 360;
+    end = (end % 360 + 360) % 360;
+    
+    let arcLength = end - start;
+    if (arcLength < 0) arcLength += 360; 
+
+    // Handle full circle
+    if (arcLength > 359.999) arcLength = 359.999;
+    
+    const angleStep = arcLength / numPoints;
+    
+    for (let i = 0; i <= numPoints; i++) {
+        const bearing = (start + i * angleStep) % 360;
+        points.push(getCirclePoint(center, radiusKm, bearing));
+    }
+    return points;
+}
+
+/**
+ * Creates the full cone polygon by tracing the outer left and right boundary curves
+ * using the smoothed track line to generate the curved cone boundaries.
+ * * **FIXED:** Implements the single, smoothly resizing cone shape.
+ * @param {Array<Object>} points - Array of {latlng: L.LatLng, ...}
+ * @param {number} coneWidthKmDay - Cone expansion rate in km per day
+ * @returns {Array<L.LatLng>} List of coordinates for the final polygon
+ */
+function createConePolygon(points, coneWidthKmDay) {
+    if (points.length < 2) return [];
+
+    let leftSide = [];
+    let rightSide = [];
+    
+    const p0 = points[0].latlng;
+    
+    // Initial radius is 0, so the starting point is p0.
+    leftSide.push(p0); 
+    rightSide.push(p0); 
+
+    // --- 1. Generate a Single Smooth Track Line for the Entire Forecast ---
+    const trackLatLngs = points.map(p => p.latlng);
+    // Use the smooth path to generate the cone boundaries (0.4 tension, 10 steps per segment)
+    const smoothPath = getSmoothPath(trackLatLngs, 0.4, 10); 
+    
+    // The number of track segments is points.length - 1 (P0 to Pn)
+    const totalSegments = points.length - 1;
+    // Number of interpolated points per segment + the segment endpoints (11 points per segment)
+    const totalSmoothPoints = smoothPath.length; 
+    
+    // --- 2. Step along the Smooth Path to Build the Cone Boundaries ---
+    for (let i = 0; i < totalSmoothPoints - 1; i++) {
+        const cPrev = smoothPath[i];
+        const cCurr = smoothPath[i+1];
+        
+        // The current index 'i+1' relative to the total number of segments 
+        // gives us the fraction of total time/days from P0 to the current smooth point.
+        const fractionOfTotalTime = (i + 1) / (totalSmoothPoints - 1) * totalSegments;
+        const interpolatedRadius = fractionOfTotalTime * coneWidthKmDay;
+        
+        // Use the bearing between two smooth-path points as the local tangent
+        const brngCenter = rhumbBearing(cPrev, cCurr);
+        
+        // Calculate the left and right boundary points perpendicular to the local bearing
+        const brngLeft = (brngCenter - 90 + 360) % 360;
+        const brngRight = (brngCenter + 90) % 360;
+        
+        const leftPoint = rhumbDestination(cCurr, interpolatedRadius, brngLeft);
+        const rightPoint = rhumbDestination(cCurr, interpolatedRadius, brngRight);
+        
+        leftSide.push(leftPoint);
+        rightSide.push(rightPoint);
+    }
+    
+    // Ensure the last point in the smooth path is the center for the final arc
+    const pN = smoothPath[smoothPath.length - 1]; 
+    const rN = totalSegments * coneWidthKmDay; // Final radius (Total Days * Km/Day)
+
+    // The last boundary points are tpNLeft and tpNRight
+    const tpNLeft = leftSide[leftSide.length - 1];
+    const tpNRight = rightSide[rightSide.length - 1];
+
+    // --- 3. Add the Arc for the Final Circle (P_n) ---
+    // Calculate the bearings from Pn center to the final tangent points
+    const bearingNLeft = rhumbBearing(pN, tpNLeft);
+    const bearingNRight = rhumbBearing(pN, tpNRight);
+
+    // Full polygon path starts with the left side (P0 to tpNLeft)
+    let coneCoords = [...leftSide];
+
+    // Arc from Left Tangent (tpNLeft) to Right Tangent (tpNRight)
+    const arcPoints = getCircleArcPoints(pN, rN, bearingNLeft, bearingNRight, ARC_STEPS);
+    coneCoords.push(...arcPoints); 
+
+    // --- 4. Build the Right Side (from Pn's right tangent back to P0) ---
+    // Reverse the right side boundary points (excluding P0)
+    const rightSideToReverse = rightSide.slice(1, rightSide.length);
+    const rightSideReversed = rightSideToReverse.reverse();
+    
+    // Add the reversed right side (R(n) back to R1)
+    coneCoords = coneCoords.concat(rightSideReversed);
+    
+    return coneCoords;
+}
+// =========================================================================
+// END OF CONE FUNCTIONS
+// =========================================================================
+
+
+/**
+ * Core function to draw the cone, track line, and markers.
+ * * **FIXED:** Drawing order is now: Cone > Track Line > Markers to ensure proper overlap/visibility.
+ */
+function drawCone() {
+    // 1. Initialize/Clear Layers
+    if (!State.coneLayer) State.coneLayer = L.layerGroup().addTo(mainMap);
+    if (!State.trackLayer) State.trackLayer = L.layerGroup().addTo(mainMap);
+    if (!State.markerLayer) State.markerLayer = L.layerGroup().addTo(mainMap); // New marker layer
+    
+    State.coneLayer.clearLayers();
+    State.trackLayer.clearLayers();
+    State.markerLayer.clearLayers(); // Clear markers
+
+    const points = State.conePoints;
+    if (points.length === 0) return;
+
+    const coneWidthKmDay = parseFloat(Dom.controls.coneWidthKmDay.value);
+    const coneStyle = Dom.controls.coneStyleSelect.value;
+    const coneHidden = Dom.controls.coneToggle.checked;
+    
+    // --- 1. Draw the Cone Polygon (Area) - Draw first, so it's lowest ---
+    if (points.length >= 2 && !coneHidden) {
+        const polygonCoords = createConePolygon(points, coneWidthKmDay);
+        
+        let fillColor, fillOpacity, color, weight, opacity;
+
+        if (coneStyle === 'pagasa') {
+            // **PAGASA style (White 35% fill, Black 80% border)**
+            fillColor = 'white'; 
+            fillOpacity = 0.25; // 35% fill
+            color = 'black'; 
+            weight = 4;
+            opacity = 0.4; // 80% border opacity
+        } else {
+            // USA style (light blue/white, thick black border)
+            fillColor = '#F0F8FF'; 
+            fillOpacity = 0.35; 
+            color = 'black';
+            weight = 3;
+            opacity = 1;
+        }
+
+        L.polygon(polygonCoords, {
+            fillColor: fillColor, 
+            fillOpacity: fillOpacity,
+            color: color,
+            weight: weight,
+            opacity: opacity,
+            // Draw in a dedicated pane if needed, but coneLayer handles it for now
+        }).addTo(State.coneLayer);
+    }
+    
+    // --- 2. Draw the Smooth Track Line - Draw second, above the cone ---
+    const trackLatLngs = points.map(p => p.latlng);
+    
+    // **Track line is Black at 80% opacity for PAGASA style**
+    const trackLineColor = 'black'; 
+    const trackLineOpacity = coneStyle === 'pagasa' ? 0.8 : 1.0; 
+
+    if (trackLatLngs.length >= 2) {
+        // Use a smoothing tension of 0.4 for a natural curve
+        const smoothPath = getSmoothPath(trackLatLngs, 0.4, 10); 
+        
+        // Find the index of the first forecast point (P1) in the smooth path
+        // The path segment from P0 to P1 has 11 points (P0 + 10 interpolated points)
+        const forecastStartIndex = 11; 
+        
+        // Draw the historical/current part (P0-P1 segment) - always solid
+        const currentPath = smoothPath.slice(0, Math.min(forecastStartIndex, smoothPath.length));
+        if (currentPath.length >= 2) {
+            L.polyline(currentPath, {
+                color: trackLineColor,
+                weight: coneStyle === 'pagasa' ? 3 : 2,
+                opacity: trackLineOpacity,
+                dashArray: '0', // Solid line
+            }).addTo(State.trackLayer);
+        }
+
+        // Draw the forecast part (P1 onwards) - always dashed for PAGASA style
+        if (smoothPath.length > forecastStartIndex) {
+            const forecastPath = smoothPath.slice(forecastStartIndex - 1); // Start from the last point of the solid track
+            L.polyline(forecastPath, {
+                color: trackLineColor,
+                weight: coneStyle === 'pagasa' ? 3 : 2,
+                opacity: trackLineOpacity,
+                dashArray: coneStyle === 'pagasa' ? '0' : '0 0', // Dashed for forecast
+            }).addTo(State.trackLayer);
+        }
+    }
+
+
+    // --- 3. Draw Markers (Icons) - Draw last, on top of everything ---
+    points.forEach((point, index) => {
+        // Only draw the marker itself if it's the current point (P0) or a forecast point (P1, P2, etc.)
+        const marker = drawPointMarker(point, index);
+        // Add to the new marker layer (which should be z-indexed higher)
+        marker.addTo(State.markerLayer); 
+    });
+}
+
+
+// DRAW MARKER (Unchanged)
+function drawPointMarker(point, index) {
+    const iconKey = point.iconType;
+    const iconSize = parseInt(Dom.controls.iconSizeSlider.value);
+
+    // PAGASA style
+    if (PAGASA_ICONS[iconKey] && Dom.controls.coneStyleSelect.value === 'pagasa') {
+        const iconUrl = PAGASA_ICONS[iconKey];
+        const iconHtml = `<img src="${iconUrl}" style="width:${iconSize}px; height:${iconSize}px; display:block;"/>`;
+        const markerIcon = L.divIcon({
+            className: 'pagasa-icon-container',
+            html: iconHtml,
+            iconSize: [iconSize, iconSize],
+            iconAnchor: [iconSize / 2, iconSize / 2]
+        });
+        const marker = L.marker(point.latlng, { icon: markerIcon });
+        if (point.dateTime || point.notes) {
+            const labelText = `P${index}: ${point.dateTime || ''}${point.notes ? ` (${point.notes})` : ''}`;
+            marker.bindTooltip(labelText, {
+                permanent: true,
+                direction: 'right',
+                className: 'forecast-marker-label',
+                offset: L.point(iconSize / 2 + 5, -8)
+            });
+        }
+        return marker;
+
+    // USA style (now also image-based)
+    } else {
+        const iconUrl = USA_ICONS[iconKey] || USA_ICONS['D'];
+        const iconHtml = `<img src="${iconUrl}" style="width:${iconSize}px; height:${iconSize}px; display:block;"/>`;
+        const markerIcon = L.divIcon({
+            className: 'usa-icon-container',
+            html: iconHtml,
+            iconSize: [iconSize, iconSize],
+            iconAnchor: [iconSize / 2, iconSize / 2]
+        });
+        const marker = L.marker(point.latlng, { icon: markerIcon });
+        if (point.dateTime || point.notes) {
+            const labelText = `P${index}: ${point.dateTime || ''}${point.notes ? ` (${point.notes})` : ''}`;
+            marker.bindTooltip(labelText, {
+                permanent: true,
+                direction: 'right',
+                className: 'forecast-marker-label',
+                offset: L.point(iconSize / 2 + 5, -8)
+            });
+        }
+        return marker;
+    }
+}
+
+// =========================================================================
+// WIND POLYGON FUNCTIONS (Unchanged)
+// =========================================================================
+
+function startWindDrawing(){
+    if (State.windDrawingMode) return;
+    State.windDrawingMode = true;
+    
+    // Reset state for new polygon
+    State.currentWindPolygon = null; 
+    State.currentWindVertices = [];
+    
+    Dom.startWindPolyBtn.classList.add('active-mode');
+    Dom.finishWindPolyBtn.disabled = false;
+    Dom.windStatus.innerText = 'Status: Click map to place the initial center (starts as a circle).';
+    toggleMapInteraction(false, 'drawing'); // Lock Map
+
+    if (!State.windLayer) State.windLayer = L.layerGroup().addTo(mainMap);
+
+    mainMap.off('click', handleMapClickForCone);
+    mainMap.on('click', handleMapClickForWind);
+}
+
+function finishWindDrawing() {
+    State.windDrawingMode = false;
+    Dom.startWindPolyBtn.classList.remove('active-mode');
+    Dom.finishWindPolyBtn.disabled = true;
+    
+    if (State.currentWindPolygon && State.currentWindVertices.length >= 3) {
+        // Save the current polygon using its final vertices
+        State.currentWindPolygon.vertices = State.currentWindVertices;
+        State.windPolygons.push(State.currentWindPolygon);
+        Dom.windStatus.innerText = `Status: Added '${State.currentWindPolygon.name}'.`;
+    } else {
+        Dom.windStatus.innerText = `Status: Drawing cancelled (min 3 points).`;
+    }
+    
+    State.currentWindPolygon = null;
+    State.currentWindVertices = [];
+    if (State.currentWindMarker) State.currentWindMarker.remove();
+    State.currentWindMarker = null;
+
+    drawWindPolygons(); // Redraw all final polygons
+    
+    mainMap.off('click', handleMapClickForWind);
+    toggleMapInteraction(true, 'drawing'); // Unlock Map
+}
+
+function handleMapClickForWind(e) {
+    if (!State.windDrawingMode) return;
+
+    if (State.currentWindVertices.length === 0) {
+        // 1. Initial click: Create a circle (for the initial wind field extent)
+        const center = e.latlng;
+        const initialRadiusKm = 150; // A reasonable initial size in km
+
+        State.currentWindPolygon = {
+            name: Dom.windPolyName.value,
+            color: Dom.windPolyColor.value,
+            vertices: [], // Will be filled with perimeter points
+            center: center
+        };
+        
+        // Generate initial vertices from the perimeter of a circle
+        State.currentWindVertices = getCirclePerimeterPoints(center, initialRadiusKm, 20); // 20 vertices for a smooth start
+
+        // Add the first center marker
+        State.currentWindMarker = L.circleMarker(center, { radius: 5, color: 'black', fillColor: 'red', fillOpacity: 1, pane: 'overlayPane' }).addTo(State.windLayer);
+        
+        Dom.windStatus.innerText = 'Status: Initial circle set. Click to add/adjust vertices.';
+    } else {
+        // 2. Subsequent clicks: Add a vertex to adjust the shape
+        State.currentWindVertices.push(e.latlng);
+        Dom.windStatus.innerText = `Status: ${State.currentWindVertices.length} vertices placed. Click 'Finish' when done.`;
+    }
+
+    drawWindPolygons();
+}
+
+function drawWindPolygons() {
+    if (!State.windLayer) State.windLayer = L.layerGroup().addTo(mainMap);
+    State.windLayer.clearLayers();
+    
+    if (!Dom.windDisplayToggle.checked) return;
+
+    const fillOpacity = 0.5; // PAGASA style wind fields have higher opacity
+    // const lineOpacity = 0.8;
+
+    // Draw all saved polygons
+    State.windPolygons.forEach(poly => {
+        L.polygon(poly.vertices, {
+            fillColor: poly.color, fillOpacity: fillOpacity, stroke: false, // PAGASA style often has no stroke
+            pane: 'overlayPane'
+        }).addTo(State.windLayer);
+    });
+    
+    // Draw the polygon currently being built
+    if (State.windDrawingMode && State.currentWindVertices.length > 0) {
+        // Draw the polygon itself
+        L.polygon(State.currentWindVertices, {
+            fillColor: State.currentWindPolygon.color, fillOpacity: fillOpacity, stroke: true,
+            color: 'black', weight: 1, opacity: 0.8, dashArray: '5 5', pane: 'overlayPane'
+        }).addTo(State.windLayer);
+        
+        // Draw individual vertex markers for the one being built
+        State.currentWindVertices.forEach(v => {
+            L.circleMarker(v, { radius: 4, color: 'black', fillColor: 'white', weight: 1.5, fillOpacity: 1, pane: 'overlayPane' }).addTo(State.windLayer);
+        });
+
+        // Keep the center marker if it exists
+        if (State.currentWindMarker) State.currentWindMarker.addTo(State.windLayer);
+    }
+}
+// =========================================================================
+// END OF WIND FUNCTIONS
+// =========================================================================
+
+// Removed drawTemporaryCircles as it's no longer used for the new cone logic
+
+
+// Cone Event Handlers
+function updateIconTypeOptions(coneStyle) {
+    const select = Dom.controls.iconTypeSelect;
+    select.innerHTML = '';
+    
+    const relevantKeys = coneStyle === 'pagasa' ? 
+        ['LPA', 'TD', 'TS', 'STS', 'TY', 'STY'] : 
+        ['D', 'S', '1', '2', '3', '4', '5', 'T']; // USA icons
+
+    relevantKeys.forEach(key => {
+        const data = ICON_TYPE_DATA[key];
+        const option = document.createElement('option');
+        option.value = data.key;
+        option.textContent = data.label;
+        select.appendChild(option);
+    });
+    
+    // Set the default selection based on the style
+    select.value = relevantKeys[0];
+}
+
+function startConeDrawing(){
+    if (State.coneDrawingMode) return;
+    State.coneDrawingMode = true;
+    State.conePoints = [];
+    Dom.startConeBtn.classList.add('active-mode');
+    Dom.finishConeBtn.disabled = false;
+    Dom.coneStatus.innerText = 'Status: Click map to place the initial storm center (P0).';
+    toggleMapInteraction(false, 'drawing'); // Lock Map
+
+    // Clear all cone-related layers
+    if (State.coneLayer) State.coneLayer.clearLayers();
+    if (State.trackLayer) State.trackLayer.clearLayers();
+    if (State.markerLayer) State.markerLayer.clearLayers();
+    if (State.tempCircleLayer) State.tempCircleLayer.clearLayers(); // Clean up just in case
+
+    // Ensure wind drawing is off
+    mainMap.off('click', handleMapClickForWind);
+    mainMap.on('click', handleMapClickForCone);
+}
+function finishConeDrawing() {
+    State.coneDrawingMode = false;
+    Dom.startConeBtn.classList.remove('active-mode');
+    Dom.finishConeBtn.disabled = true;
+    Dom.coneStatus.innerText = `Status: Finished drawing. ${State.conePoints.length} points total.`;
+    mainMap.off('click', handleMapClickForCone);
+    
+    // Clear the temporary "imaginary" circles
+    if (State.tempCircleLayer) State.tempCircleLayer.clearLayers();
+    
+    drawCone(); 
+    
+    toggleMapInteraction(true, 'drawing'); // Unlock Map
+}
+function handleMapClickForCone(e) {
+    if (!State.coneDrawingMode) return;
+
+    const newPoint = {
+        latlng: e.latlng,
+        iconType: Dom.controls.iconTypeSelect.value,
+        dateTime: Dom.pointDateTimeInput.value,
+        notes: Dom.pointNotesInput.value,
+    };
+    State.conePoints.push(newPoint);
+    Dom.pointDateTimeInput.value = ''; 
+    Dom.pointNotesInput.value = ''; 
+    Dom.applyPointDataBtn.disabled = false;
+
+    Dom.coneStatus.innerText = `Status: P${State.conePoints.length - 1} placed. Ready for P${State.conePoints.length}.`;
+    
+    drawCone();
+}
+
+// Helper to manage map lock
+function toggleMapInteraction(enable, mode) {
+    if (enable) {
+        // Only enable if no other mode is active
+        if (mode === 'drawing' && State.annotationMode) return;
+        if (mode === 'annotation' && (State.coneDrawingMode || State.windDrawingMode)) return;
+
+        mainMap.dragging.enable();
+        mainMap.scrollWheelZoom.enable();
+        mainMap.touchZoom.enable();
+        mainMap.doubleClickZoom.enable();
+        mainMap.boxZoom.enable();
+        Dom.mapAreaEl.classList.remove('locked', 'drawing');
+    } else {
+        // Disable map interactions
+        mainMap.dragging.disable();
+        mainMap.scrollWheelZoom.disable();
+        mainMap.touchZoom.disable();
+        mainMap.doubleClickZoom.disable();
+        mainMap.boxZoom.disable();
+        
+        if (mode === 'drawing') Dom.mapAreaEl.classList.add('drawing');
+        else if (mode === 'annotation') Dom.mapAreaEl.classList.add('locked');
+    }
+}
+
+function computeTransitionDuration(){const s=State.speed||0;const min=0.06,max=0.28;return Math.max(min, Math.min(max, max-(s/2500)*(max-min)));}
+
+async function loadGeoJSON(){
+    try{
+        const resp = await fetch('https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson');
+        State.geojson = await resp.json();
+        const landColor = Dom.controls.landColor.value;
+
+        mainMap.eachLayer(layer => {
+            if (layer.options && layer.options.pane === 'overlayPane') {
+                mainMap.removeLayer(layer);
+            }
+        });
+
+        // Add the main landmass layer that we'll use for SVG overlay
+        State.landmassLayer = L.geoJSON(State.geojson, {
+            style: () => ({
+                color: '#444', weight: 2, fill: landColor, fillOpacity: 1
+            }), pane: 'overlayPane'
+        }).addTo(mainMap);
+
+        updateLandOverlay();
+        refreshGraticule();
+        drawPAR();
+    }catch(e){console.error("Error loading GeoJSON:", e);}
+}
+
+function updateLandOverlay(){
+    const landSVG = Dom.landSVG; landSVG.innerHTML=''; 
+    if(!State.geojson||!Dom.controls.landToggle.checked) return;
+
+    // Get the SVG path elements generated by Leaflet's GeoJSON layer in the 'overlayPane'
+    const paneSvg = mainMap.getPane('overlayPane').querySelector('svg');
+    if(!paneSvg) return;
+
+    const landColor = Dom.controls.landColor.value; 
+
+    const clonedGroup = document.createElementNS('http://www.w3.org/2000/svg','g');
+    // Get leaflet's transform
+    const transform = paneSvg.style.transform;
+    
+    paneSvg.querySelectorAll('path').forEach(p=>{
+        const pathStyle = p.getAttribute('fill');
+        // Only clone land paths
+        if (pathStyle === 'none' && p.getAttribute('stroke') !== '#444') return;
+        if (pathStyle !== landColor && pathStyle !== 'rgb(255, 234, 189)') return; // Filter for land
+
+        const d=p.getAttribute('d');
+        if(!d)return;
+
+        const newPath=document.createElementNS('http://www.w3.org/2000/svg','path');
+        newPath.setAttribute('d',d);
+        newPath.setAttribute('stroke','#444');
+        newPath.setAttribute('stroke-width','0.5');
+        newPath.setAttribute('fill',landColor);
+        newPath.setAttribute('fill-opacity','1');
+        clonedGroup.appendChild(newPath);
+    });
+    // Apply leaflet's transform + our precise map area offset
+    clonedGroup.setAttribute('transform', `${transform} translate(${innerMapArea.left}, ${innerMapArea.top})`);
+    landSVG.appendChild(clonedGroup);
+}
+
+function cleanupStripLabels(){ 
+    [Dom.topStrip,Dom.bottomStrip,Dom.leftStrip,Dom.rightStrip].forEach(strip=>{
+        Array.from(strip.querySelectorAll('.coord-edge')).forEach(n=>n.remove());
+    });
+    State.coordDivs={};
+}
+
+function setOrMoveCoord(key, cls, text, pos){
+    let el = State.coordDivs[key];
+    if(!el){
+        el=document.createElement('div');
+        el.className='coord-edge '+cls;
+        State.coordDivs[key]=el;
+        if(cls.includes('top')) Dom.topStrip.appendChild(el);
+        else if(cls.includes('bottom')) Dom.bottomStrip.appendChild(el);
+        else if(cls.includes('left')) Dom.leftStrip.appendChild(el);
+        else if(cls.includes('right')) Dom.rightStrip.appendChild(el);
+    }
+    el.innerText=text;
+    if(cls.includes('top') || cls.includes('bottom')) {
+        el.style.left = pos + 'px';
+        el.style.top = ''; // Use CSS for vertical centering
+    } else {
+        el.style.top = pos + 'px';
+        el.style.left = ''; // Use CSS for horizontal centering
+    }
+    el.style.transitionDuration=computeTransitionDuration()+'s';
+}
+
+function drawEdgeLabels(latStart,latEnd,latStep,lonStart,lonEnd,lonStep){
+    cleanupStripLabels();
+    if(!Dom.controls.gridToggle.checked) return;
+    const bounds=mainMap.getBounds();
+    const mapContainerWidth = mainMap.getSize().x;
+    const mapContainerHeight = mainMap.getSize().y;
+
+    // Longitude Labels (Top and Bottom)
+    for(let lon=lonStart;lon<=lonEnd;lon+=lonStep){
+        const p = mainMap.latLngToContainerPoint([bounds.getNorth(),lon]);
+        // Calculate position relative to the *map-container* edge
+        const mapX = p.x + innerMapArea.left;
+        
+        // Only show if label is inside the map-container's visible frame
+        const fallsOverMapArea = (p.x >= 0) && (p.x <= mapContainerWidth);
+
+        let lonText = `${Math.abs(lon)}°`;
+        if (lon !== 0) {
+            lonText += (lon > 0 ? 'E' : 'W');
+        }
+
+        if(fallsOverMapArea) {
+            setOrMoveCoord(`lon-top-${lon}`,'top',lonText, mapX);
+            setOrMoveCoord(`lon-bottom-${lon}`,'bottom',lonText, mapX);
+        }
+    }
+
+    // Latitude Labels (Left and Right)
+    for(let lat=latStart; lat>=latEnd; lat-=latStep){
+        const p = mainMap.latLngToContainerPoint([lat, bounds.getWest()]);
+        // Calculate position relative to the *map-container* edge
+        const mapY = p.y + innerMapArea.top;
+
+        // Only show if label is inside the map-container's visible frame
+        const fallsOverMapArea = (p.y >= 0) && (p.y <= mapContainerHeight);
+
+        let latText = `${Math.abs(lat)}°`;
+        if (lat !== 0) {
+            latText += (lat > 0 ? 'N' : 'S');
+        }
+
+        if(fallsOverMapArea) {
+            setOrMoveCoord(`lat-left-${lat}`, 'left', latText, mapY);
+            setOrMoveCoord(`lat-right-${lat}`, 'right', latText, mapY);
+        }
+    }
+}
+
+function refreshGraticule(){ 
+    const latStep = parseFloat(Dom.controls.latStepInput.value) || 5;
+    const lonStep = parseFloat(Dom.controls.lonStepInput.value) || 5;
+
+    const bounds = mainMap.getBounds();
+    // const mapSize = mainMap.getSize();
+
+    const latStart = Math.ceil(bounds.getNorth()/latStep)*latStep;
+    const latEnd = Math.floor(bounds.getSouth()/latStep)*latStep;
+    const lonStart = Math.floor(bounds.getWest()/lonStep)*lonStep;
+    const lonEnd = Math.ceil(bounds.getEast()/lonStep)*lonStep;
+
+    drawEdgeLabels(latStart, latEnd, latStep, lonStart, lonEnd, lonStep);
+
+    // --- Draw Grids ---
+    const gridSVG = Dom.gridSVG;
+    gridSVG.innerHTML = ''; // Clear only grid SVG
+    if (!Dom.controls.gridToggle.checked) return;
+
+    const graticuleWeight = parseFloat(Dom.controls.graticuleWeight.value);
+    const strokeDashArray = State.graticuleStyle === 'dashed' ? '4 4' : '0';
+    const strokeColor = '#999';
+    const svgNS = "http://www.w3.org/2000/svg";
+    const group = document.createElementNS(svgNS, 'g');
+    const tickLength = 5; // Length of the small ticks
+
+    const mapTop = innerMapArea.top;
+    const mapLeft = innerMapArea.left;
+    const mapRight = FIXED_WIDTH - innerMapArea.right;
+    const mapBottom = FIXED_HEIGHT - innerMapArea.bottom;
+
+    // Latitudinal lines (East-West)
+    for(let lat=latStart; lat>=latEnd; lat-=latStep){
+        const pWest = mainMap.latLngToContainerPoint([lat, bounds.getWest()]);
+        const y = pWest.y + mapTop;
+        
+        if (y < mapTop || y > mapBottom) continue;
+
+        // Full line
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', mapLeft);
+        line.setAttribute('y1', y);
+        line.setAttribute('x2', mapRight);
+        line.setAttribute('y2', y);
+        line.setAttribute('stroke', strokeColor);
+        line.setAttribute('stroke-width', graticuleWeight);
+        line.setAttribute('stroke-dasharray', strokeDashArray);
+        group.appendChild(line);
+
+        // Ticks (Accurate PAGASA style)
+        const leftTick = document.createElementNS(svgNS, 'line');
+        leftTick.setAttribute('x1', mapLeft);
+        leftTick.setAttribute('y1', y);
+        leftTick.setAttribute('x2', mapLeft - tickLength);
+        leftTick.setAttribute('y2', y);
+        leftTick.setAttribute('stroke', 'black');
+        leftTick.setAttribute('stroke-width', 1); 
+        group.appendChild(leftTick);
+
+        const rightTick = document.createElementNS(svgNS, 'line');
+        rightTick.setAttribute('x1', mapRight);
+        rightTick.setAttribute('y1', y);
+        rightTick.setAttribute('x2', mapRight + tickLength);
+        rightTick.setAttribute('y2', y);
+        rightTick.setAttribute('stroke', 'black');
+        rightTick.setAttribute('stroke-width', 1); 
+        group.appendChild(rightTick);
+    }
+
+    // Longitudinal lines (North-South)
+    for(let lon=lonStart; lon<=lonEnd; lon+=lonStep){
+        const pNorth = mainMap.latLngToContainerPoint([bounds.getNorth(), lon]);
+        const x = pNorth.x + mapLeft;
+
+        if (x < mapLeft || x > mapRight) continue;
+
+        // Full line
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', x);
+        line.setAttribute('y1', mapTop);
+        line.setAttribute('x2', x);
+        line.setAttribute('y2', mapBottom);
+        line.setAttribute('stroke', strokeColor);
+        line.setAttribute('stroke-width', graticuleWeight);
+        line.setAttribute('stroke-dasharray', strokeDashArray);
+        group.appendChild(line);
+
+        // Ticks
+        const topTick = document.createElementNS(svgNS, 'line');
+        topTick.setAttribute('x1', x);
+        topTick.setAttribute('y1', mapTop);
+        topTick.setAttribute('x2', x);
+        topTick.setAttribute('y2', mapTop - tickLength);
+        topTick.setAttribute('stroke', 'black');
+        topTick.setAttribute('stroke-width', 1);
+        group.appendChild(topTick);
+
+        const bottomTick = document.createElementNS(svgNS, 'line');
+        bottomTick.setAttribute('x1', x);
+        bottomTick.setAttribute('y1', mapBottom);
+        bottomTick.setAttribute('x2', x);
+        bottomTick.setAttribute('y2', mapBottom + tickLength);
+        bottomTick.setAttribute('stroke', 'black');
+        bottomTick.setAttribute('stroke-width', 1);
+        group.appendChild(bottomTick);
+    }
+    gridSVG.appendChild(group);
+}
+
+function drawPAR(){
+    const parSVG = Dom.parSVG;
+    parSVG.innerHTML = '';
+    if (!State.parVisible) return;
+
+    const svgNS = "http://www.w3.org/2000/svg";
+    const points = PAR_COORDS.map(p => mainMap.latLngToContainerPoint(L.latLng(p[0], p[1])));
+
+    const polygonPoints = points.map(p => `${p.x + innerMapArea.left},${p.y + innerMapArea.top}`).join(' ');
+
+    const polygon = document.createElementNS(svgNS, 'polygon');
+    polygon.setAttribute('points', polygonPoints);
+    polygon.setAttribute('fill', 'transparent'); 
+    polygon.setAttribute('stroke', '#000000');
+    polygon.setAttribute('stroke-width', '3.5');
+    polygon.setAttribute('stroke-dasharray', '8 4');
+
+    parSVG.appendChild(polygon);
+}
+
+
+// CANVAS-LIKE ANNOTATION FUNCTIONS 
+function generateAnnotationList() {
+    Dom.annotationList.innerHTML = '';
+    const elements = Array.from(Dom.canvaOverlay.querySelectorAll('.annotation-element'));
+
+    if (elements.length === 0) {
+        Dom.annotationList.innerHTML = '<div style="color: #999; font-size: 11px;">No elements added yet.</div>';
+        return;
+    }
+
+    elements.reverse().forEach((el, index) => { // Reverse to mimic layer order
+        const listItem = document.createElement('div');
+        let type, textContent;
+        
+        if (el.classList.contains('annotation-text')) {
+            type = 'Text';
+            textContent = el.innerText.trim().substring(0, 20) || 'Untitled Text';
+        } else if (el.classList.contains('annotation-image')) {
+            type = 'Image';
+            textContent = 'Imported Image';
+        } else if (el.classList.contains('annotation-shape')) {
+            type = 'Rectangle';
+            textContent = 'Rectangle Shape';
+        }
+        
+        const layerName = `${type} - ${textContent}`;
+        listItem.className = 'annotation-list-item';
+        listItem.textContent = layerName;
+        listItem.setAttribute('data-id', el.dataset.id);
+        
+        if (el === State.selectedAnnotation) {
+            listItem.classList.add('selected');
+        }
+
+        listItem.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectAnnotation(el);
+        });
+
+        Dom.annotationList.appendChild(listItem);
+    });
+}
+
+function deselectAllAnnotations() {
+    if (State.selectedAnnotation) {
+        State.selectedAnnotation.classList.remove('selected');
+        State.selectedAnnotation.style.cursor = 'grab'; // Reset cursor
+        State.selectedAnnotation = null;
+    }
+    Dom.deleteAnnotationBtn.disabled = true;
+    generateAnnotationList();
+}
+
+function selectAnnotation(el) {
+    deselectAllAnnotations();
+    State.selectedAnnotation = el;
+    el.classList.add('selected');
+    el.style.cursor = 'move'; // Change cursor when selected
+
+    Dom.deleteAnnotationBtn.disabled = false;
+
+    // Update color picker
+    if (el.classList.contains('annotation-text')) {
+        Dom.annotationColor.value = el.style.color || '#000000';
+    } else if (el.classList.contains('annotation-shape')) {
+        Dom.annotationColor.value = el.style.backgroundColor || '#FF4500';
+    }
+    
+    generateAnnotationList();
+}
+
+function makeDraggableAndResizable(el) {
+    let isDragging = false;
+    let startX, startY;
+    let startLeft, startTop;
+
+    // Give a unique ID for the list
+    el.dataset.id = 'anno-' + Date.now() + Math.random().toString(16).slice(2);
+
+    el.addEventListener('mousedown', (e) => {
+        if (!State.annotationMode) return;
+        e.stopPropagation();
+        selectAnnotation(el);
+        
+        const rect = el.getBoundingClientRect();
+        const tolerance = 15; 
+        const isResizeClick = (rect.right - e.clientX < tolerance) || 
+                              (rect.bottom - e.clientY < tolerance) || 
+                              (e.clientX - rect.left < tolerance) || 
+                              (e.clientY - rect.top < tolerance);
+        
+        const isEditable = el.getAttribute('contentEditable') === 'true';
+
+        if (!isResizeClick && (!isEditable || e.detail === 2)) {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startLeft = el.offsetLeft;
+            startTop = el.offsetTop;
+            el.style.cursor = 'grabbing';
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging || !State.annotationMode) return;
+        e.preventDefault();
+        
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+
+        el.style.left = (startLeft + deltaX) + 'px';
+        el.style.top = (startTop + deltaY) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        isDragging = false;
+        if (State.annotationMode && State.selectedAnnotation === el) {
+            el.style.cursor = 'move';
+        } else {
+            el.style.cursor = 'grab';
+        }
+        generateAnnotationList(); 
+    });
+
+    el.addEventListener('click', (e) => {
+        e.stopPropagation(); 
+        selectAnnotation(el);
+    });
+
+    if (el.classList.contains('annotation-text')) {
+        el.addEventListener('input', generateAnnotationList);
+    }
+    
+    generateAnnotationList();
+}
+
+// Text Tool
+Dom.addTextBtn.addEventListener('click', () => {
+    if (!State.annotationMode) return;
+
+    const el = document.createElement('div');
+    el.className = 'annotation-element annotation-text';
+    el.contentEditable = 'true';
+    el.textContent = 'New Label';
+    el.style.left = '50%';
+    el.style.top = '50%';
+    el.style.transform = 'translate(-50%, -50%)';
+    el.style.fontSize = '30px'; 
+    el.style.fontWeight = 'bold';
+    el.style.color = Dom.annotationColor.value; 
+    el.style.width = 'fit-content'; 
+    el.style.height = 'fit-content';
+    el.style.minWidth = '50px'; 
+    el.style.minHeight = '30px'; 
+
+    Dom.canvaOverlay.appendChild(el);
+    makeDraggableAndResizable(el);
+    selectAnnotation(el);
+    el.focus();
+});
+
+// Rectangle Tool
+Dom.addRectBtn.addEventListener('click', () => {
+    if (!State.annotationMode) return;
+
+    const el = document.createElement('div');
+    el.className = 'annotation-element annotation-shape';
+    el.style.width = '100px';
+    el.style.height = '100px';
+    el.style.left = '50%';
+    el.style.top = '50%';
+    el.style.transform = 'translate(-50%, -50%)';
+    el.style.backgroundColor = Dom.annotationColor.value; 
+    el.style.opacity = '0.5';
+
+    Dom.canvaOverlay.appendChild(el);
+    makeDraggableAndResizable(el);
+    selectAnnotation(el);
+});
+
+// Image Import Tool
+Dom.addImageBtn.addEventListener('click', () => {
+    if (!State.annotationMode) return;
+    Dom.imageInput.click();
+});
+Dom.imageInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const el = document.createElement('div');
+            el.className = 'annotation-element';
+            el.style.width = '150px'; // Initial size
+            el.style.height = '150px';
+            el.style.left = '50%';
+            el.style.top = '50%';
+            el.style.transform = 'translate(-50%, -50%)';
+
+            const img = document.createElement('img');
+            img.src = event.target.result;
+            img.className = 'annotation-image';
+            el.appendChild(img);
+
+            Dom.canvaOverlay.appendChild(el);
+            makeDraggableAndResizable(el);
+            selectAnnotation(el);
+        };
+        reader.readAsDataURL(file);
+    }
+    Dom.imageInput.value = ''; // Clear file input
+});
+
+// Color Update for Selected Element
+Dom.annotationColor.addEventListener('input', (e) => {
+    if (State.selectedAnnotation) {
+        if (State.selectedAnnotation.classList.contains('annotation-text')) {
+            State.selectedAnnotation.style.color = e.target.value;
+        } else if (State.selectedAnnotation.classList.contains('annotation-shape')) {
+            State.selectedAnnotation.style.backgroundColor = e.target.value;
+        }
+    }
+});
+
+// Delete Selected
+Dom.deleteAnnotationBtn.addEventListener('click', () => {
+    if (State.selectedAnnotation) {
+        State.selectedAnnotation.remove();
+        State.selectedAnnotation = null;
+        Dom.deleteAnnotationBtn.disabled = true;
+        generateAnnotationList();
+    }
+});
+
+// Start/Finish Annotation Mode
+Dom.startAnnotationBtn.addEventListener('click', () => {
+    State.annotationMode = true;
+    toggleMapInteraction(false, 'annotation'); // Lock Map
+
+    Dom.canvaOverlay.classList.add('active');
+    Dom.annotationTools.style.display = 'flex';
+    Dom.startAnnotationBtn.disabled = true;
+    Dom.finishAnnotationBtn.disabled = false;
+    
+    deselectAllAnnotations();
+});
+
+Dom.finishAnnotationBtn.addEventListener('click', () => {
+    State.annotationMode = false;
+    toggleMapInteraction(true, 'annotation'); // Unlock Map
+
+    Dom.canvaOverlay.classList.remove('active');
+    Dom.annotationTools.style.display = 'none';
+    Dom.startAnnotationBtn.disabled = false;
+    Dom.finishAnnotationBtn.disabled = true;
+    
+    deselectAllAnnotations(); // Ensure no handles are visible
+});
+
+// Global Deselect
+Dom.canvaOverlay.addEventListener('click', (e) => {
+    if (State.annotationMode && e.target === Dom.canvaOverlay) {
+        deselectAllAnnotations();
+    }
+});
+
+
+// =========================================================================
+// NEW: CUSTOM FONT FUNCTIONS
+// =========================================================================
+
+function applyCustomFont(fontBase64, fontName) {
+    const styleSheet = Dom.customFontStyles;
+    
+    // Determine font format from data URL (simple check for ttf/otf)
+    const format = fontBase64.includes('font/ttf') ? 'truetype' : 
+                   fontBase64.includes('font/otf') ? 'opentype' : 'woff';
+
+    // 1. Define the custom font using @font-face
+    const fontFaceRule = `
+        @font-face {
+            font-family: "${fontName}";
+            src: url("${fontBase64}") format("${format}");
+            font-weight: normal;
+            font-style: normal;
+        }
+    `;
+    // 2. Apply the custom font to all relevant elements
+    // The !important flag is necessary to override the inline style on html, body
+    const customFontRule = `
+        html, body, #signature-box, #signature-text, .coord-edge, .forecast-marker-label {
+            font-family: "${fontName}", Arial, Helvetica, sans-serif !important;
+        }
+    `;
+    
+    // Clear and inject the new rules
+    styleSheet.innerHTML = fontFaceRule + customFontRule;
+    Dom.fontStatus.innerText = `Status: Font '${fontName}' applied successfully.`;
+}
+
+function resetFont() {
+    Dom.customFontStyles.innerHTML = ''; // Clear custom font rules
+    
+    // Re-apply original Arial font family to the core elements
+    const defaultFont = 'Arial, Helvetica, sans-serif';
+    
+    document.querySelector('html').style.fontFamily = defaultFont; 
+    document.querySelector('body').style.fontFamily = defaultFont; 
+    
+    // Reset specific elements that rely on the font-family variable
+    document.getElementById('signature-box').style.fontFamily = defaultFont;
+    
+    Dom.fontStatus.innerText = 'Status: Font reset to Arial.';
+}
+
+// =========================================================================
+// EVENT LISTENERS & INITIALIZATION
+// =========================================================================
+
+mainMap.on('move zoom', () => {
+    State.speed=0;
+    refreshGraticule();
+    drawPAR();
+    updateLandOverlay(); // Redraw land overlay
+    
+    if(State.conePoints.length > 0) drawCone();
+    if (State.windPolygons.length > 0 || State.currentWindVertices.length > 0) drawWindPolygons();
+});
+
+// Grid Listeners
+Dom.controls.latStepInput.addEventListener('input', refreshGraticule);
+Dom.controls.lonStepInput.addEventListener('input', refreshGraticule);
+Dom.controls.gridToggle.addEventListener('change', refreshGraticule);
+Dom.controls.graticuleWeight.addEventListener('input', refreshGraticule);
+Dom.toggleGraticuleStyleBtn.addEventListener('click', ()=>{
+    State.graticuleStyle = State.graticuleStyle === 'solid' ? 'dashed' : 'solid';
+    Dom.toggleGraticuleStyleBtn.innerText = State.graticuleStyle === 'solid' ? '➖ Solid Graticule' : '┄ Dashed Graticule';
+    refreshGraticule();
+});
+
+// Map Listeners
+Dom.controls.landToggle.addEventListener('change', updateLandOverlay);
+Dom.controls.landColor.addEventListener('input', () => {
+    if (State.landmassLayer) {
+        State.landmassLayer.setStyle({ fillColor: Dom.controls.landColor.value });
+    }
+    updateLandOverlay();
+});
+Dom.controls.oceanColor.addEventListener('input', (e) => {
+    document.getElementById('map-container').style.backgroundColor = e.target.value;
+});
+
+// RESET COLOR
+Dom.resetColorsBtn.addEventListener('click', () => {
+    Dom.controls.landColor.value = DEFAULT_LAND_COLOR;
+    Dom.controls.oceanColor.value = DEFAULT_OCEAN_COLOR;
+    
+    document.getElementById('map-container').style.backgroundColor = DEFAULT_OCEAN_COLOR;
+    if (State.landmassLayer) {
+        State.landmassLayer.setStyle({ fillColor: DEFAULT_LAND_COLOR });
+    }
+    updateLandOverlay();
+});
+
+// PAR Listener
+Dom.togglePARBtn.addEventListener('click', ()=>{
+    State.parVisible = !State.parVisible;
+    drawPAR();
+});
+
+// Cone Listeners
+Dom.startConeBtn.addEventListener('click', startConeDrawing);
+Dom.finishConeBtn.addEventListener('click', finishConeDrawing);
+Dom.controls.coneStyleSelect.addEventListener('change', (e) => {
+    updateIconTypeOptions(e.target.value);
+    drawCone(); // Redraw cone to apply new style
+});
+Dom.controls.coneToggle.addEventListener('change', drawCone);
+Dom.controls.iconSizeSlider.addEventListener('input', drawCone);
+Dom.controls.coneWidthKmDay.addEventListener('input', drawCone);
+
+
+// Load example
+Dom.loadPAGASAExample.addEventListener('click', () => {
+    // Example data to test the sharp turn (TD to TY, then turning)
+    State.conePoints = [
+        { latlng: L.latLng(12.5, 128.5), iconType: 'TD', dateTime: '2PM 18 Oct. 2025 (Sat.)' },
+        { latlng: L.latLng(14.0, 126.0), iconType: 'TS', dateTime: '2AM 19 Oct. 2025 (Sun.)' },
+        { latlng: L.latLng(15.2, 123.8), iconType: 'TS', dateTime: '2PM 19 Oct. 2025 (Sun.)' },
+        { latlng: L.latLng(16.5, 121.5), iconType: 'STS', dateTime: '2AM 20 Oct. 2025 (Mon.)' },
+        // Sharp turn back to the east/north
+        { latlng: L.latLng(16.0, 120.0), iconType: 'TY', dateTime: '2PM 20 Oct. 2025 (Mon.)' },
+        { latlng: L.latLng(17.5, 122.0), iconType: 'TY', dateTime: '2AM 21 Oct. 2025 (Tue.)' }
+    ];
+    Dom.controls.coneStyleSelect.value = 'pagasa'; // Default to the fixed style
+    updateIconTypeOptions('pagasa'); 
+    Dom.controls.coneWidthKmDay.value = 50;
+    drawCone();
+    mainMap.setView([16, 124], 5);
+
+    // Add example wind polygons from image 1000023508
+    State.windPolygons = [
+        { // Yellowish wind field area
+            name: "Gale-force winds (39-63 kt)",
+            color: "#FFD700", // Gold/Yellow
+            vertices: [
+                L.latLng(10.5, 124.5), L.latLng(11.5, 126.5), L.latLng(13.5, 127.5),
+                L.latLng(16.5, 126.0), L.latLng(17.5, 123.5), L.latLng(16.0, 121.0),
+                L.latLng(14.0, 122.0), L.latLng(12.0, 123.0)
+            ]
+        },
+        { // Reddish wind field area (smaller, stronger winds)
+            name: "Storm-force winds (>63 kt)",
+            color: "#DC143C", // Crimson/Red
+            vertices: [
+                L.latLng(11.8, 124.0), L.latLng(12.5, 125.0), L.latLng(13.0, 124.0),
+                L.latLng(12.2, 123.0)
+            ]
+        }
+    ];
+    drawWindPolygons();
+});
+
+
+// Point Data Apply Listener
+Dom.applyPointDataBtn.addEventListener('click', ()=>{
+    if(State.conePoints.length > 0){
+        const lastPoint = State.conePoints[State.conePoints.length - 1];
+        lastPoint.dateTime = Dom.pointDateTimeInput.value;
+        lastPoint.notes = Dom.pointNotesInput.value;
+        drawCone();
+        Dom.pointDateTimeInput.value = '';
+        Dom.pointNotesInput.value = '';
+        Dom.applyPointDataBtn.disabled = true;
+    }
+});
+
+// NEW Wind Listeners
+Dom.startWindPolyBtn.addEventListener('click', startWindDrawing);
+Dom.finishWindPolyBtn.addEventListener('click', finishWindDrawing);
+Dom.windDisplayToggle.addEventListener('change', drawWindPolygons);
+Dom.clearWindPolysBtn.addEventListener('click', () => {
+    State.windPolygons = [];
+    if (State.windLayer) State.windLayer.clearLayers();
+    Dom.windStatus.innerText = 'Status: All wind polygons cleared.';
+});
+
+
+// Philippines Provinces Toggle
+Dom.philippinesToggle.addEventListener('change', async function() {
+    if (this.checked) {
+        Dom.phStatus.innerText = 'Status: Loading...';
+        try {
+            const response = await fetch('https://raw.githubusercontent.com/macoymejia/geojsonph/master/Province/Provinces.json');
+            const geojsonData = await response.json();
+            
+            const provinceStyle = { fill: false, color: '#333333', weight: 1, opacity: 0.7 };
+            if (State.phProvincesLayer) mainMap.removeLayer(State.phProvincesLayer);
+
+            State.phProvincesLayer = L.geoJSON(geojsonData, { style: provinceStyle, pane: 'overlayPane' }).addTo(mainMap);
+            Dom.phStatus.innerText = 'Status: Provinces visible.';
+        } catch (e) {
+            Dom.phStatus.innerText = 'Error: Could not load GeoJSON.';
+            this.checked = false;
+        }
+    } else {
+        if (State.phProvincesLayer) {
+            mainMap.removeLayer(State.phProvincesLayer);
+            State.phProvincesLayer = null;
+        }
+        Dom.phStatus.innerText = 'Status: Provinces hidden.';
+    }
+});
+
+
+// --- Custom Font Listeners ---
+Dom.customFontInput.addEventListener('change', () => {
+    Dom.applyCustomFontBtn.disabled = !Dom.customFontInput.files.length;
+    if (Dom.customFontInput.files.length) {
+        Dom.fontStatus.innerText = `Status: File '${Dom.customFontInput.files[0].name}' ready to apply.`;
+    }
+});
+
+Dom.applyCustomFontBtn.addEventListener('click', () => {
+    const file = Dom.customFontInput.files[0];
+    const fontName = Dom.customFontName.value || 'CustomMapFont';
+    
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            // Data URL format: url('data:font/woff;base64,...')
+            const dataUrl = e.target.result;
+            applyCustomFont(dataUrl, fontName);
+        };
+        // Read the file as a Data URL (Base64 encoding)
+        reader.readAsDataURL(file);
+    } else {
+        Dom.fontStatus.innerText = 'Error: No font file selected.';
+    }
+});
+
+Dom.resetFontBtn.addEventListener('click', resetFont);
+
+// Clock Logic
+function updateClock(){ 
+    const now = new Date();
+    const dateOptions = { year: 'numeric', month: 'short', day: 'numeric' };
+    const dateString = now.toLocaleDateString('en-US', dateOptions);
+    const timeOptions = {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset'
+    };
+    const timeString = now.toLocaleTimeString('en-US', timeOptions);
+    Dom.dateText.innerText = dateString;
+    Dom.timeText.innerText = timeString;
+}
+
+// Download Logic
+Dom.downloadBtn.addEventListener('click', async ()=>{
+    // Hide annotation handles
+    deselectAllAnnotations();
+    
+    // Hide temporary circles
+    if (State.tempCircleLayer) State.tempCircleLayer.clearLayers();
+    
+    Dom.previewModal.style.display = 'flex';
+    refreshGraticule();
+    drawPAR();
+    updateLandOverlay();
+
+    const canvas = await html2canvas(document.getElementById('map-container'), {
+        ignoreElements: (element) => {
+            return element.id === 'controls' || element.id === 'bottom-area' || element.id === 'previewModal';
+        },
+        useCORS: true,
+        allowTaint: true,
+    });
+    Dom.previewHolder.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = canvas.toDataURL('image/png');
+    img.style.maxWidth = '100%'; img.style.maxHeight = '90vh';
+    Dom.previewHolder.appendChild(img);
+});
+Dom.saveImageBtn.addEventListener('click', ()=> {
+    const img = Dom.previewHolder.querySelector('img');
+    if (img) {
+        const a = document.createElement('a');
+        a.href = img.src;
+        a.download = 'bulletin_map.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }
+});
+Dom.closePreviewBtn.addEventListener('click', ()=> {
+    Dom.previewModal.style.display = 'none';
+});
+
+// Final Initializers
+setInterval(updateClock,1000); updateClock();
+loadGeoJSON(); 
+updateIconTypeOptions('pagasa'); // Initial population for PAGASA style
+
+// Set a higher z-index for the new marker layer
+mainMap.createPane('markerPane');
+mainMap.getPane('markerPane').style.zIndex = 650; // Above default overlays (500) and tooltips (600)
+</script>
+</body>
+</html>
